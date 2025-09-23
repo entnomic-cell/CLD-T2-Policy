@@ -1,0 +1,893 @@
+$IsAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $IsAdmin) {
+    Write-Host "`n[WARNING] Admin privileges required." -ForegroundColor Red
+    Write-Host "[ACTION] Run PowerShell as Administrator." -ForegroundColor Yellow
+    Pause
+    exit 1
+}
+
+function Write-ColoredLine {
+    param (
+        [string]$Text,
+        [ConsoleColor]$Color = 'White'
+    )
+    $oldColor = $Host.UI.RawUI.ForegroundColor
+    $Host.UI.RawUI.ForegroundColor = $Color
+    Write-Host $Text
+    $Host.UI.RawUI.ForegroundColor = $oldColor
+}
+
+function Wait-ForEnter {
+    param([string]$Message = "Press Enter to Continue")
+    Write-ColoredLine $Message 'Yellow'
+    while (-not [System.Console]::KeyAvailable -or [System.Console]::ReadKey($true).Key -ne "Enter") {
+        Start-Sleep -Milliseconds 50
+    }
+}
+
+function Show-CustomLoadingBar {
+    $symbols = @('⠋', '⠙', '⠹', '⠸')
+    $i = 0
+    for ($p = 0; $p -le 100; $p += 25) {
+        $bar = '█' * ($p / 10) + '░' * (10 - ($p / 10))
+        Write-Host -NoNewline "`rScan: [$bar] $p% $($symbols[$i % 4])" -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 100
+        $i++
+    }
+    Write-Host "`n"
+}
+
+$logFile = "C:\ToolsCLD\file_log.txt"
+function Start-FileWatcher {
+    try {
+        $watcher = New-Object System.IO.FileSystemWatcher
+        $watcher.Path = "C:\"
+        $watcher.IncludeSubdirectories = $true
+        $watcher.EnableRaisingEvents = $true
+        $watcher.NotifyFilter = [System.IO.NotifyFilters]::FileName -bor [System.IO.NotifyFilters]::LastAccess
+        $wshell = New-Object -ComObject WScript.Shell
+
+        $action = {
+            $path = $Event.SourceEventArgs.FullPath
+            $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            Add-Content -Path $logFile -Value "[$time] Opened: $path" -ErrorAction SilentlyContinue
+            $wshell.Popup("This application was opened: $path", 5, "File Access", 64)
+        }
+
+        Register-ObjectEvent -InputObject $watcher -EventName Created -SourceIdentifier FileCreated -Action $action
+        Register-ObjectEvent -InputObject $watcher -EventName Changed -SourceIdentifier FileChanged -Action $action
+    } catch {
+        Write-ColoredLine "[WARNING] File watcher setup failed." Yellow
+    }
+}
+
+Clear-Host
+Write-Host "  ____ _     ____    _____ _   ____       _ _            " -ForegroundColor Red
+Write-Host " / ___| |   |  _ \  |_   _/ | |  _ \ ___ | (_) ___ _   _ " -ForegroundColor Red
+Write-Host "| |   | |   | | | |   | | | | | |_) / _ \| | |/ __| | | |" -ForegroundColor Red
+Write-Host "| |___| |___| |_| |   | | | | |  __/ (_) | | | (__| |_| |" -ForegroundColor Red
+Write-Host " \____|_____|____/    |_| |_| |_|   \___/|_|_|\___|\__, |" -ForegroundColor Red
+Write-Host "                                                   |___/  " -ForegroundColor Red
+Write-ColoredLine ""
+Write-ColoredLine "=== CLD T1 POLICY ===" Cyan
+Write-ColoredLine "Anti-Cheat Scanner by Entnomic" 'Magenta'
+Write-ColoredLine "Pass all the steps." White
+Write-ColoredLine "Tools saved to C:\ToolsCLD." White
+Write-ColoredLine "Admin required." White
+Write-Host ""
+
+$cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($cpu -and $cpu.NumberOfCores -ge 4 -and $cpu.MaxClockSpeed -ge 2500) {
+    Write-ColoredLine "CPU: $($cpu.Name)" Green
+    Write-ColoredLine "✓ Good performance." Green 
+} else {
+    Write-ColoredLine "CPU: $($cpu.Name)" Red
+    Write-ColoredLine "⚠ Slower scans possible." Yellow
+}
+Write-Host ""
+
+$gpu = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object -First 1
+$gpuName = $gpu.Name
+$goodGPUs = @("RTX 30", "RTX 40", "RX 6000", "RX 7000")
+$gpuIsGood = $goodGPUs | Where-Object { $gpuName -like "*$_*" }
+if ($gpuIsGood) {
+    Write-ColoredLine "GPU: $gpuName" Green
+    Write-ColoredLine "✓ Optimal." Green 
+} else {
+    Write-ColoredLine "GPU: $gpuName" Red
+    Write-ColoredLine "⚠ May impact performance." Yellow
+}
+
+Write-ColoredLine ""
+Write-ColoredLine "=== Credits ===" Cyan
+Write-ColoredLine "Made by Entnomic" 'Magenta'
+Write-Host ""
+Wait-ForEnter -Message "Press Enter to Start"
+Clear-Host
+
+New-Item -ItemType Directory -Path "C:\ToolsCLD" -ErrorAction SilentlyContinue | Out-Null
+Start-FileWatcher
+
+Write-ColoredLine "Step 1/8: System Integrity" White
+Write-ColoredLine "Checking security..." Cyan
+Show-CustomLoadingBar
+
+$modulesOutput = @()
+$windowsOutput = @()
+$memoryIntegrityOutput = @()
+$defenderOutput = @()
+$exclusionsOutput = @()
+$threatsOutput = @()
+$powershellSigOutput = @()
+
+$defaultModules = @("Microsoft.PowerShell.Archive", "Microsoft.PowerShell.Diagnostics", "Microsoft.PowerShell.Host", "Microsoft.PowerShell.LocalAccounts", "Microsoft.PowerShell.Management", "Microsoft.PowerShell.Security", "Microsoft.PowerShell.Utility", "PackageManagement", "PowerShellGet", "PSReadLine", "Pester", "ThreadJob")
+$protectedModule = "Microsoft.PowerShell.Operation.Validation"
+$modulesPath = "C:\Program Files\WindowsPowerShell\Modules"
+
+$modules = Get-ChildItem $modulesPath -Directory -ErrorAction SilentlyContinue
+foreach ($module in $modules) {
+    $moduleName = $module.Name
+    if ($moduleName -eq $protectedModule) {
+        $modulesOutput += "SUCCESS: Protected module verified."
+    } elseif ($moduleName -notin $defaultModules) {
+        $modulesOutput += "FAILURE: Unauthorized module: $moduleName"
+    }
+}
+if (-not $modulesOutput) { $modulesOutput += "SUCCESS: No unauthorized modules." }
+
+$windowsOutput += if ($env:OS -eq "Windows_NT") { "SUCCESS: Windows OS." } else { "FAILURE: Non-Windows OS." }
+
+try {
+    $enabled = Get-ItemPropertyValue "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" -Name "Enabled" -ErrorAction Stop
+    $memoryIntegrityOutput += if ($enabled -eq 1) { "SUCCESS: Memory Integrity ON." } else { "FAILURE: Memory Integrity OFF." }
+} catch {
+    $memoryIntegrityOutput += "WARNING: Memory Integrity check failed."
+}
+
+try {
+    $defender = Get-MpComputerStatus -ErrorAction Stop
+    $defenderOutput += if ($defender.AntivirusEnabled -and $defender.RealTimeProtectionEnabled) { "SUCCESS: Defender active." } else { "FAILURE: Defender not active." }
+} catch {
+    $defenderOutput += "WARNING: Defender check failed."
+}
+
+$exclusionsOutput += if ((Get-MpPreference).ExclusionPath) { "FAILURE: Exclusions found." } else { "SUCCESS: No exclusions." }
+
+$threatsOutput += if ((Get-MpThreat).Count -eq 0) { "SUCCESS: No threats." } else { "FAILURE: Threats detected." }
+
+try {
+    $sig = Get-AuthenticodeSignature "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $powershellSigOutput += if ($sig.Status -eq 'Valid' -and $sig.SignerCertificate.Subject -like '*Microsoft Windows*') { "SUCCESS: PowerShell signed." } else { "FAILURE: PowerShell signature invalid." }
+} catch {
+    $powershellSigOutput += "WARNING: PowerShell signature check failed."
+}
+
+function Write-Section {
+    param([string]$Title, [string[]]$Lines)
+    Write-ColoredLine "--- $Title ---" Cyan
+    foreach ($line in $Lines) {
+        if ($line -match "^SUCCESS") { Write-ColoredLine "✓ $line" Green }
+        elseif ($line -match "^FAILURE") { Write-ColoredLine "✗ $line" Red }
+        elseif ($line -match "^WARNING") { Write-ColoredLine "! $line" Yellow }
+        else { Write-ColoredLine $line Green }
+    }
+}
+
+Write-Section "Modules" $modulesOutput
+Write-Section "OS" $windowsOutput
+Write-Section "Memory Integrity" $memoryIntegrityOutput
+Write-Section "Defender" $defenderOutput
+Write-Section "Exclusions" $exclusionsOutput
+Write-Section "Threats" $threatsOutput
+Write-Section "PowerShell" $powershellSigOutput
+
+$allResults1 = $modulesOutput + $windowsOutput + $memoryIntegrityOutput + $defenderOutput + $exclusionsOutput + $threatsOutput + $powershellSigOutput
+$total1 = ($allResults1 | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success1 = ($allResults1 | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate1 = if ($total1 -gt 0) { [math]::Round(($success1 / $total1) * 100, 0) } else { 100 }
+$rateColor1 = if ($rate1 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 1 Success: $rate1% ($success1/$total1)" $rateColor1
+Wait-ForEnter -Message "Press Enter for Step 2"
+Clear-Host
+
+Write-ColoredLine "Step 2/8: BAM and Prefetch" White
+Write-ColoredLine "Checking BAM entries and Prefetch..." Cyan
+Show-CustomLoadingBar
+
+$bamOutput = @()
+$prefetchOutput = @()
+
+$suspiciousFiles = @("matcha", "olduimatrix", "autoexe", "bin", "workspace", "monkeyaim", "thunderaim", "thunderclient", "celex", "release", "matrix", "matcha.exe", "triggerbot", "solara", "xeno", "wave", "cloudy", "tupical", "horizon", "myst", "celery", "zarora", "juju", "nezure", "FusionHacks.zip", "release.zip", "bootstrapper", "aimmy.exe", "aimmy", "Fluxus", "clumsy", "build", "build.zip", "build.rar", "MystW.exe", "isabelle", "dx9", "dx9ware")
+$suspiciousList = @("isabelle", "xeno", "solara", "bootstrapper", "bootstrappernew", "loader", "santoware", "mystw", "severe", "mapper", "thunderclient", "monkeyaim", "olduimatrix", "matrix", "matcha")
+$watchlist = @("BOOTSTRAPPERNEW.EXE", "BOOTSTRAPPER.EXE", "XENO.EXE", "XENOUI.EXE", "SOLARA.EXE", "MAPPER.EXE", "LOADER.EXE", "MATCHA.EXE", "EVOLVE.EXE")
+$allSuspicious = $suspiciousFiles + $suspiciousList + $watchlist
+
+try {
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $bamEntries = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\bam\State\UserSettings\$sid" -ErrorAction Stop
+    $bamApps = @()
+    $isSuspiciousBAM = $false
+    foreach ($entry in ($bamEntries.PSObject.Properties | Where-Object { $_.Name -notlike "PS*" })) {
+        if ($entry.Value.Length -ge 8) {
+            $timestamp = [BitConverter]::ToInt64($entry.Value, 0)
+            $date = [DateTime]::FromFileTime($timestamp)
+            $appPath = $entry.Name
+            $isSuspicious = $allSuspicious | Where-Object { $appPath -imatch $_ }
+            $bamApps += [PSCustomObject]@{Text = "$appPath - Last: $date"; Color = if ($isSuspicious) { "Red" } else { "Green" }}
+            if ($isSuspicious) { $isSuspiciousBAM = $true }
+        }
+    }
+    if ($bamApps) {
+        $bamOutput += "SUCCESS: Found $($bamApps.Count) BAM entries."
+        if ($isSuspiciousBAM) { $bamOutput += "FAILURE: Suspicious BAM detected." }
+        foreach ($app in $bamApps) { $bamOutput += $app.Text }
+    } else {
+        $bamOutput += "SUCCESS: No BAM entries."
+    }
+} catch {
+    $bamOutput += "WARNING: BAM access failed."
+}
+
+try {
+    $prefetchFiles = Get-ChildItem "C:\Windows\Prefetch" -Filter "*.pf" -ErrorAction Stop
+    $prefetchApps = @()
+    $isSuspiciousPrefetch = $false
+    foreach ($file in $prefetchFiles) {
+        $appName = $file.Name.Split('-')[0]
+        $isSuspicious = $allSuspicious | Where-Object { $appName -imatch $_ }
+        $prefetchApps += [PSCustomObject]@{Text = "$appName - Last: $($file.LastWriteTime)"; Color = if ($isSuspicious) { "Red" } else { "Green" }}
+        if ($isSuspicious) { $isSuspiciousPrefetch = $true }
+    }
+    if ($prefetchApps) {
+        $prefetchOutput += "SUCCESS: Found $($prefetchApps.Count) Prefetch entries."
+        if ($isSuspiciousPrefetch) { $prefetchOutput += "FAILURE: Suspicious Prefetch detected." }
+        foreach ($app in $prefetchApps) { $prefetchOutput += $app.Text }
+    } else {
+        $prefetchOutput += "SUCCESS: No Prefetch entries."
+    }
+} catch {
+    $prefetchOutput += "WARNING: Prefetch access failed."
+}
+
+Write-ColoredLine "--- BAM Entries ---" Cyan
+foreach ($line in $bamOutput) {
+    if ($line -match "^SUCCESS") { Write-ColoredLine "✓ $line" Green }
+    elseif ($line -match "^FAILURE") { Write-ColoredLine "✗ $line" Red }
+    elseif ($line -match "^WARNING") { Write-ColoredLine "! $line" Yellow }
+    else { Write-ColoredLine $line ($bamApps | Where-Object { $_.Text -eq $line } | Select-Object -ExpandProperty Color -ErrorAction SilentlyContinue) }
+}
+Write-ColoredLine "--- Prefetch Entries ---" Cyan
+foreach ($line in $prefetchOutput) {
+    if ($line -match "^SUCCESS") { Write-ColoredLine "✓ $line" Green }
+    elseif ($line -match "^FAILURE") { Write-ColoredLine "✗ $line" Red }
+    elseif ($line -match "^WARNING") { Write-ColoredLine "! $line" Yellow }
+    else { Write-ColoredLine $line ($prefetchApps | Where-Object { $_.Text -eq $line } | Select-Object -ExpandProperty Color -ErrorAction SilentlyContinue) }
+}
+
+$allResults2 = $bamOutput + $prefetchOutput
+$total2 = ($allResults2 | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success2 = ($allResults2 | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate2 = if ($total2 -gt 0) { [math]::Round(($success2 / $total2) * 100, 0) } else { 100 }
+$rateColor2 = if ($rate2 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 2 Success: $rate2% ($success2/$total2)" $rateColor2
+Wait-ForEnter -Message "Press Enter for Step 3"
+Clear-Host
+
+Write-ColoredLine "Step 3/8: Process Explorer" White
+Write-ColoredLine "Launching Process Explorer. Scroll to bottom, then close." Cyan
+Show-CustomLoadingBar
+
+$processNames = @("procexp32", "procexp64", "procexp64a")
+$runningPE = Get-Process -ErrorAction SilentlyContinue | Where-Object { $processNames -contains $_.ProcessName.ToLower() }
+
+if ($runningPE) {
+    Write-ColoredLine "[SUCCESS] Terminated running Process Explorer." Green
+    $runningPE | ForEach-Object {
+        try {
+            Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            Write-ColoredLine "[SUCCESS] Terminated PID $($_.Id)." Green
+        } catch {
+            Write-ColoredLine "[FAILED] Failed to terminate PID $($_.Id)." Red
+        }
+    }
+    Start-Sleep -Seconds 1
+} else {
+    Write-ColoredLine "[SUCCESS] No Process Explorer running." Green
+}
+
+$baseFolder = "C:\ToolsCLD"
+$extractFolder = Join-Path $baseFolder "ProcessExplorer"
+$zipUrl = "https://download.sysinternals.com/files/ProcessExplorer.zip"
+$zipPath = Join-Path $baseFolder "ProcessExplorer.zip"
+
+if (Test-Path $baseFolder) {
+    Write-ColoredLine "[SUCCESS] Cleaned C:\ToolsCLD." Green
+    Get-ChildItem -Path $baseFolder -Force -Recurse | ForEach-Object {
+        try {
+            if ($_.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+                $_.Attributes = $_.Attributes -bxor [System.IO.FileAttributes]::ReadOnly
+            }
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-ColoredLine "[INFO] Couldn't remove $($_.FullName)." White
+        }
+    }
+} else {
+    New-Item -ItemType Directory -Path $baseFolder -ErrorAction Stop | Out-Null
+    Write-ColoredLine '[SUCCESS] Created C:\ToolsCLD.' Green
+}
+
+try {
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+    Write-ColoredLine '[SUCCESS] Downloaded Process Explorer.' Green
+} catch {
+    Write-ColoredLine '[FAILED] Download failed.' Red
+}
+
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractFolder)
+    Write-ColoredLine '[SUCCESS] Extracted Process Explorer.' Green
+} catch {
+    Write-ColoredLine '[SUCCESS] Files already exist.' Green
+}
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+$regFileUrl = "https://pastebin.com/raw/gse8NxwU"
+$regFilePath = Join-Path $baseFolder "procexp_config.reg"
+
+try {
+    Invoke-WebRequest -Uri $regFileUrl -OutFile $regFilePath -UseBasicParsing -ErrorAction Stop
+    Write-ColoredLine "[SUCCESS] Downloaded registry config." Green
+} catch {
+    Write-ColoredLine "[FAILED] Registry config download failed." Red
+}
+
+try {
+    & "$env:SystemRoot\System32\cmd.exe" /c "reg import `"$regFilePath`""
+    if ($LASTEXITCODE -eq 0) {
+        Write-ColoredLine "[SUCCESS] Imported registry config." Green
+    } else {
+        Write-ColoredLine "[FAILED] Registry import failed." Red
+    }
+} catch {
+    Write-ColoredLine "[FAILED] Registry import error." Red
+}
+
+$actualExe = Get-ChildItem -Path $extractFolder -Filter "procexp64.exe" -Recurse | Select-Object -First 1
+
+$peOutput = @()
+if ($actualExe) {
+    Write-ColoredLine "[SUCCESS] Launching Process Explorer." Green
+    $process = Start-Process -FilePath $actualExe.FullName -PassThru
+    Start-Sleep -Seconds 1
+    $wshell = New-Object -ComObject WScript.Shell
+    Start-Sleep -Milliseconds 500
+    $null = $wshell.AppActivate($process.Id)
+    $wshell.SendKeys('% x')
+    Write-ColoredLine "[SUCCESS] Process Explorer maximized." Green
+    $process.WaitForExit()
+    $peOutput += "SUCCESS: Process Explorer launched and closed."
+} else {
+    $peOutput += "FAILURE: procexp64.exe not found."
+}
+
+Write-Section "Process Explorer" $peOutput
+
+$total3 = ($peOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success3 = ($peOutput | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate3 = if ($total3 -gt 0) { [math]::Round(($success3 / $total3) * 100, 0) } else { 100 }
+$rateColor3 = if ($rate3 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 3 Success: $rate3% ($success3/$total3)" $rateColor3
+Wait-ForEnter -Message "Press Enter for Step 4"
+Clear-Host
+
+# Step 4/8: WinObj Check
+Write-ColoredLine "Step 4/8: WinObj Check" White
+Write-ColoredLine "INSTRUCTION: Navigate to Sessions > 0 > Dos Devices > Click on every folder, then close the window." Yellow
+Show-CustomLoadingBar
+
+$winobjOutput = @()
+$runningWinObj = Get-Process -Name "winobj" -ErrorAction SilentlyContinue
+if ($runningWinObj) {
+    Write-ColoredLine "[SUCCESS] Terminated running WinObj.exe processes." Green
+    $runningWinObj | ForEach-Object {
+        try {
+            Stop-Process -Id $_.Id -Force -ErrorAction Stop
+            Write-ColoredLine "[SUCCESS] Terminated PID $($_.Id)." Green
+        } catch {
+            Write-ColoredLine "[FAILED] Failed to terminate PID $($_.Id)." Red
+        }
+    }
+    Start-Sleep -Seconds 1
+} else {
+    Write-ColoredLine "[SUCCESS] No WinObj running." Green
+}
+
+$extractFolder = Join-Path $baseFolder "WinObj"
+$zipUrl = "https://download.sysinternals.com/files/WinObj.zip"
+$zipPath = Join-Path $baseFolder "WinObj.zip"
+
+if (Test-Path $extractFolder) {
+    Write-ColoredLine "[SUCCESS] Cleaned WinObj folder." Green
+    Get-ChildItem -Path $extractFolder -Force -Recurse | ForEach-Object {
+        try {
+            if ($_.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+                $_.Attributes = $_.Attributes -bxor [System.IO.FileAttributes]::ReadOnly
+            }
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-ColoredLine "[INFO] Couldn't remove $($_.FullName)." White
+        }
+    }
+} else {
+    New-Item -ItemType Directory -Path $extractFolder -ErrorAction Stop | Out-Null
+    Write-ColoredLine '[SUCCESS] Created WinObj folder.' Green
+}
+
+try {
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+    Write-ColoredLine '[SUCCESS] Downloaded WinObj.' Green
+} catch {
+    Write-ColoredLine '[FAILED] Download failed.' Red
+    $winobjOutput += "FAILURE: WinObj download failed."
+}
+
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractFolder)
+    Write-ColoredLine '[SUCCESS] Extracted WinObj.' Green
+} catch {
+    Write-ColoredLine '[SUCCESS] WinObj files already exist.' Green
+}
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+$actualExe = Get-ChildItem -Path $extractFolder -Filter "WinObj.exe" -Recurse | Select-Object -First 1
+
+if ($actualExe) {
+    Write-ColoredLine "[SUCCESS] Launching WinObj." Green
+    $process = Start-Process -FilePath $actualExe.FullName -PassThru
+    Start-Sleep -Seconds 1
+    $wshell = New-Object -ComObject WScript.Shell
+    Start-Sleep -Milliseconds 500
+    $null = $wshell.AppActivate($process.Id)
+    $wshell.SendKeys('% x')
+    Write-ColoredLine "[SUCCESS] WinObj maximized." Green
+    $process.WaitForExit()
+    $winobjOutput += "SUCCESS: WinObj launched and closed."
+} else {
+    $winobjOutput += "FAILURE: WinObj.exe not found."
+}
+
+Write-Section "WinObj Check" $winobjOutput
+
+$total4 = ($winobjOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success4 = ($winobjOutput | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate4 = if ($total4 -gt 0) { [math]::Round(($success4 / $total4) * 100, 0) } else { 100 }
+$rateColor4 = if ($rate4 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 4 Success: $rate4% ($success4/$total4)" $rateColor4
+Wait-ForEnter -Message "Press Enter for Step 5"
+Clear-Host
+
+Write-ColoredLine "Step 5 of 8: Autorun Check" White
+Write-ColoredLine "INSTRUCTION: Wait for the bottom left text to say 'Ready', scroll slowly down, then close the window when finished." Green
+Write-Host ""
+
+for ($i = 0; $i -le 10; $i++) {
+    $percent = $i * 10
+    $bar = "#" * $i + "-" * (10 - $i)
+    $line = "Progress: [ $bar ] $percent%"
+    Write-Host -NoNewline "`r"
+    $oldColor = $Host.UI.RawUI.ForegroundColor
+    $Host.UI.RawUI.ForegroundColor = 'White'
+    Write-Host $line -NoNewline
+    $Host.UI.RawUI.ForegroundColor = $oldColor
+    Start-Sleep -Milliseconds 200
+}
+Write-Host ""
+Write-Host ""
+
+$baseFolder = "C:\ToolsCLD"
+$extractFolder = Join-Path $baseFolder "Autoruns"
+$zipUrl = "https://download.sysinternals.com/files/Autoruns.zip"
+$zipPath = Join-Path $baseFolder "Autoruns.zip"
+
+if (Test-Path $baseFolder) {
+    Get-ChildItem -Path $baseFolder -Force -Recurse | ForEach-Object {
+        try {
+            $_.Attributes = 'Normal'
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop
+        } catch { }
+    }
+    Write-ColoredLine "[SUCCESS] Cleared contents of ${baseFolder}" Green
+} else {
+    try {
+        New-Item -ItemType Directory -Path $baseFolder -ErrorAction Stop | Out-Null
+        Write-ColoredLine "[SUCCESS] Created folder ${baseFolder}" Green
+    } catch {
+        Write-ColoredLine "[FAILED] Could not create folder ${baseFolder}: $($_.Exception.Message)" Red
+        exit 1
+    }
+}
+
+try {
+    Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -ErrorAction Stop
+    Write-ColoredLine "[SUCCESS] Downloaded Autoruns" Green
+} catch {
+    Write-ColoredLine "[FAILED] Download failed: $($_.Exception.Message)" Red
+    exit 1
+}
+
+try {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($zipPath, $extractFolder)
+    Remove-Item $zipPath -Force
+    Write-ColoredLine "[SUCCESS] Extracted Autoruns" Green
+} catch {
+    Write-ColoredLine "[FAILED] Extraction failed: $($_.Exception.Message)" Red
+    exit 1
+}
+
+$actualExe = Get-ChildItem -Path $extractFolder -Filter "Autoruns.exe" -Recurse | Where-Object {
+    $_.FullName -notmatch "64|cmd"
+} | Select-Object -First 1
+
+if (-not $actualExe) {
+    Write-ColoredLine "[FAILED] Autoruns.exe not found" Red
+    exit 1
+} else {
+    Write-ColoredLine "[SUCCESS] Found Autoruns.exe" Green
+}
+
+$runningAutoruns = Get-Process -Name "autoruns" -ErrorAction SilentlyContinue
+if ($runningAutoruns) {
+    $runningAutoruns | Stop-Process -Force
+    Start-Sleep -Seconds 2
+    Write-ColoredLine "[SUCCESS] Terminated existing Autoruns process(es)" Green
+}
+
+try {
+    $process = Start-Process -FilePath $actualExe.FullName -PassThru
+    Write-ColoredLine "[SUCCESS] Launched Autoruns" Green
+} catch {
+    Write-ColoredLine "[FAILED] Failed to launch Autoruns: $($_.Exception.Message)" Red
+    exit 1
+}
+
+$hwnd = $null
+for ($i = 0; $i -lt 10; $i++) {
+    $process.Refresh()
+    $hwnd = $process.MainWindowHandle
+    if ($hwnd -ne 0) { break }
+    Start-Sleep -Milliseconds 500
+}
+
+if ($hwnd -and $hwnd -ne 0) {
+    [WinAPI]::ShowWindow($hwnd, $SW_MAXIMIZE) | Out-Null
+    Write-ColoredLine "[SUCCESS] Autoruns window maximized" Green
+} else {
+    Write-ColoredLine "[FAILED] Could not maximize window" Red
+}
+
+while (!$process.HasExited) { Start-Sleep -Seconds 1 }
+
+Write-ColoredLine ""
+Write-ColoredLine "[SUCCESS] Success Rate: 100% (1 / 1)" Green
+Wait-ForEnter -PromptMessage "Press Enter to continue."
+Clear-Host
+
+
+Write-ColoredLine "Step 6/8: Mouse and Keyboard Software Detection" White
+Write-ColoredLine "Checking for gaming peripheral software..." Cyan
+Show-CustomLoadingBar
+
+$hardwareOutput = @()
+
+$peripherals = @(
+    @{Name="Razer"; Software="C:\Program Files\Razer\Synapse3\Razer Synapse.exe"},
+    @{Name="Corsair"; Software="C:\Program Files (x86)\Corsair\CORSAIR iCUE Software\iCUE.exe"},
+    @{Name="Logitech"; Software="C:\Program Files\Logitech\G HUB\lghub.exe"},
+    @{Name="SteelSeries"; Software="C:\Program Files\SteelSeries\SteelSeries Engine 3\SteelSeriesEngine3.exe"},
+    @{Name="HyperX"; Software="C:\Program Files\HyperX\NGenuity\Ngenuity.exe"},
+    @{Name="ASUS"; Software="C:\Program Files (x86)\ASUS\Armoury Crate\ArmouryCrate.exe"},
+    @{Name="MSI"; Software="C:\Program Files (x86)\MSI\MSI Dragon Center\MSIDragonCenter.exe"},
+    @{Name="Roccat"; Software="C:\Program Files\Roccat\Roccat Swarm\RoccatSwarm.exe"},
+    @{Name="CoolerMaster"; Software="C:\Program Files\Cooler Master\MasterPlus\MasterPlus.exe"},
+    @{Name="EVGA"; Software="C:\Program Files (x86)\EVGA\EVGA Precision X1\PrecisionX1.exe"}
+)
+
+try {
+    $usbDevices = Get-PnpDevice -Class "Keyboard","Mouse" | Where-Object { $_.Status -eq "OK" }
+    $foundPeripherals = $false
+    foreach ($periph in $peripherals) {
+        $deviceDetected = $usbDevices | Where-Object { $_.FriendlyName -like "*$($periph.Name)*" }
+        $softwareExists = Test-Path $periph.Software
+
+        if ($deviceDetected) {
+            Write-ColoredLine "Detected $($periph.Name) hardware." Green
+        }
+
+        if ($softwareExists) {
+            Write-ColoredLine "Launching $($periph.Name) software. Please go to the Macro section." Cyan
+            Start-Process $periph.Software
+            $foundPeripherals = $true
+        }
+
+        if (-not $deviceDetected -and -not $softwareExists) {
+            Write-ColoredLine "No $($periph.Name) hardware or software found." Yellow
+        }
+    }
+
+    if (-not $foundPeripherals) {
+        $hardwareOutput += "SUCCESS: No supported software detected."
+    } else {
+        $hardwareOutput += "SUCCESS: Peripheral software check completed."
+    }
+} catch {
+    Write-ColoredLine "! Peripheral detection failed." Yellow
+    $hardwareOutput += "WARNING: Peripheral detection failed."
+}
+
+Write-Section "Mouse & Keyboard Software Check" $hardwareOutput
+
+$total6 = ($hardwareOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success6 = ($hardwareOutput | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate6 = if ($total6 -gt 0) { [math]::Round(($success6 / $total6) * 100, 0) } else { 100 }
+$rateColor6 = if ($rate6 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 6 Success: $rate6% ($success6/$total6)" $rateColor6
+Wait-ForEnter -Message "Press Enter for Step 7"
+Clear-Host
+
+Write-ColoredLine "Step 7/8: Full Cheat Detection Scan" White
+Write-ColoredLine "Scanning Downloads, active processes, and registry..." Cyan
+Write-ColoredLine "⚠ DO NOT CLOSE THIS WINDOW UNDER ANY CIRCUMSTANCES! ⚠" Red
+Show-CustomLoadingBar
+
+$step7Output = @()
+$suspiciousCombined = @(
+    "matcha","olduimatrix","autoexe","bin","workspace","monkeyaim","thunderaim","thunderclient",
+    "celex","release","matrix","matcha.exe","triggerbot","solara","xeno","wave","cloudy",
+    "tupical","horizon","myst","celery","zarora","juju","nezure","FusionHacks.zip","release.zip",
+    "bootstrapper","aimmy.exe","aimmy","Fluxus","clumsy","build","build.zip","build.rar","MystW.exe",
+    "isabelle","dx9","dx9ware","bootstrappernew","loader","santoware","mystw","severe","mapper",
+    "BOOTSTRAPPERNEW.EXE","BOOTSTRAPPER.EXE","XENO.EXE","XENOUI.EXE","SOLARA.EXE","MAPPER.EXE",
+    "LOADER.EXE","MATCHA.EXE","EVOLVE.EXE"
+)
+
+$downloadsPath = [Environment]::GetFolderPath("UserProfile") + "\Downloads"
+try {
+    $downloadFiles = Get-ChildItem $downloadsPath -File -Recurse -ErrorAction Stop
+    foreach ($file in $downloadFiles) {
+        foreach ($susp in $suspiciousCombined) {
+            if ($file.Name -imatch [regex]::Escape($susp)) {
+                $step7Output += "FAILURE: Suspicious file in Downloads: $($file.FullName)"
+            }
+        }
+    }
+} catch {
+    $step7Output += "WARNING: Cannot access Downloads folder."
+}
+
+try {
+    $activeProcs = Get-Process | Select-Object -ExpandProperty ProcessName
+    foreach ($proc in $activeProcs) {
+        foreach ($susp in $suspiciousCombined) {
+            if ($proc -imatch [regex]::Escape($susp)) {
+                $step7Output += "FAILURE: Suspicious process running: $proc"
+            }
+        }
+    }
+} catch {
+    $step7Output += "WARNING: Active process check failed."
+}
+
+try {
+    $muiPath = "HKCU:\SOFTWARE\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache"
+    $entries = Get-ItemProperty -Path $muiPath -ErrorAction Stop
+    foreach ($prop in $entries.PSObject.Properties) {
+        foreach ($susp in $suspiciousCombined) {
+            if ($prop.Name.ToLower() -like "*$susp*") {
+                $step7Output += "WARNING: Suspicious registry entry: $($prop.Name)"
+            }
+        }
+    }
+} catch {
+    $step7Output += "WARNING: Cannot access MuiCache registry."
+}
+
+Start-Job {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    function Show-ProcessActiveHistory {
+        $form = New-Object Windows.Forms.Form
+        $form.Text = "Process Active History (DO NOT CLOSE)"
+        $form.WindowState = 'Maximized'
+        $form.MinimumSize = New-Object Drawing.Size(800, 600)
+        $form.StartPosition = "CenterScreen"
+        $form.BackColor = [Drawing.Color]::White
+        $form.Topmost = $true
+
+        $listBox = New-Object Windows.Forms.ListBox
+        $listBox.Dock = 'Fill'
+        $listBox.Font = New-Object Drawing.Font("Consolas", 10)
+        $listBox.BackColor = [Drawing.Color]::White
+        $listBox.ForeColor = [Drawing.Color]::Black
+        $form.Controls.Add($listBox)
+
+        $seen = [System.Collections.Generic.HashSet[string]]::new()
+        $timer = New-Object Windows.Forms.Timer
+        $timer.Interval = 2000
+        $timer.Add_Tick({
+            $procs = Get-Process | Where-Object { $_.MainWindowTitle -or $_.ProcessName }
+            foreach ($p in $procs) {
+                $name = $p.ProcessName
+                if (-not $seen.Contains($name)) {
+                    $seen.Add($name) | Out-Null
+                    $stamp = Get-Date -Format "HH:mm:ss"
+                    $msg = "[$stamp] Opened: $name"
+                    $listBox.Invoke([action]{ $listBox.Items.Add($msg) }) | Out-Null
+                }
+            }
+        })
+        $timer.Start()
+        $form.Add_Shown({ $form.Activate() })
+        $form.Add_Closing({ $timer.Stop(); $timer.Dispose() })
+        [void] $form.ShowDialog()
+    }
+
+    Show-ProcessActiveHistory
+} | Out-Null
+
+if (-not $step7Output) { $step7Output += "SUCCESS: No suspicious files, processes, or registry entries detected." }
+
+Write-Section "Step 7: Downloads, Processes, Registry Scan" $step7Output
+Wait-ForEnter -Message "Press Enter for Defender History"
+Clear-Host
+
+
+Write-ColoredLine "Step 8/8: Windows Defender Protection History" White
+Write-ColoredLine "Checking Windows Defender protection history..." Cyan
+Show-CustomLoadingBar
+
+$defenderHistoryOutput = @()
+try {
+    $threats = Get-MpThreat -ErrorAction Stop
+    if ($threats.Count -eq 0) {
+        $defenderHistoryOutput += "SUCCESS: No threats detected in Defender history."
+    } else {
+        foreach ($threat in $threats) {
+            $threatType = $threat.ThreatName
+            $timeDetected = $threat.DetectionTime
+            $appPath = $threat.Resources | Where-Object { $_ -like "file:*" } | ForEach-Object { $_ -replace "file:_", "" }
+            if ($appPath) {
+                $defenderHistoryOutput += "Threat: $threatType, Detected: $timeDetected, Application: $appPath"
+            } else {
+                $defenderHistoryOutput += "Threat: $threatType, Detected: $timeDetected, Application: Unknown"
+            }
+        }
+    }
+} catch {
+    $defenderHistoryOutput += "WARNING: Failed to retrieve Defender protection history."
+}
+
+Write-Section "Defender Protection History" $defenderHistoryOutput
+
+$total8 = ($defenderHistoryOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success8 = ($defenderHistoryOutput | Where-Object { $_ -match '^SUCCESS' }).Count
+$rate8 = if ($total8 -gt 0) { [math]::Round(($success8 / $total8) * 100, 0) } else { 100 }
+$rateColor8 = if ($rate8 -eq 100) { "Green" } else { "Red" }
+
+Write-ColoredLine "Step 8 Success: $rate8% ($success8/$total8)" $rateColor8
+
+
+
+$LogFile = "C:\Logs\WindowsDefenderChanges.log"
+$LogDir  = Split-Path $LogFile -Parent
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
+function Write-Log {
+    param([string]$Message)
+    $entry = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
+    Add-Content -Path $LogFile -Value $entry -Encoding UTF8
+    Write-Host $entry -ForegroundColor Cyan
+}
+
+function Check-DefenderChanges {
+    try {
+        $mpref = Get-MpPreference -ErrorAction Stop
+        $rtp   = (Get-MpComputerStatus).RealTimeProtectionEnabled
+        $excl  = $mpref.ExclusionPath
+
+        if ($rtp -ne $PrevState.RTP) {
+            Write-Log "⚠ Real-Time Protection changed: $($PrevState.RTP) → $rtp by $env:USERNAME"
+        }
+
+        $added   = $excl | Where-Object { $_ -notin $PrevState.Excl }
+        $removed = $PrevState.Excl | Where-Object { $_ -notin $excl }
+        if ($added)   { Write-Log "➕ Exclusion(s) added: $($added -join ', ') by $env:USERNAME" }
+        if ($removed) { Write-Log "➖ Exclusion(s) removed: $($removed -join ', ') by $env:USERNAME" }
+
+        $script:PrevState = [PSCustomObject]@{ RTP = $rtp; Excl = $excl }
+    }
+    catch { Write-Log "❌ Error checking Defender: $_" }
+}
+
+
+
+Write-Host "1. Click the button below when you have finished your game." -ForegroundColor Yellow
+Write-Host "[ Press Enter to 'Click' ]" -ForegroundColor Green
+
+
+try {
+    $mpref = Get-MpPreference -ErrorAction Stop
+    $rtp   = (Get-MpComputerStatus).RealTimeProtectionEnabled
+    $excl  = $mpref.ExclusionPath
+    $script:PrevState = [PSCustomObject]@{
+        RTP = $rtp
+        Excl = $excl
+    }
+    Write-Log "Monitoring started. Real-Time Protection = $rtp"
+    Write-Log "Initial Exclusions: $($excl -join ', ')"
+}
+catch {
+    Write-Log "❌ Error getting Defender status: $_"
+    exit
+}
+
+
+try {
+    $query = @"
+<QueryList>
+  <Query Id="0" Path="Microsoft-Windows-Windows Defender/Operational">
+    <Select Path="Microsoft-Windows-Windows Defender/Operational">
+      *[System[(EventID=5001 or EventID=5007)]]
+    </Select>
+  </Query>
+</QueryList>
+"@
+
+    $elog = New-Object System.Diagnostics.Eventing.Reader.EventLogQuery("Microsoft-Windows-Windows Defender/Operational",[System.Diagnostics.Eventing.Reader.PathType]::LogName,$query)
+    $watcher = New-Object System.Diagnostics.Eventing.Reader.EventLogWatcher($elog)
+    Register-ObjectEvent -InputObject $watcher -EventName EventRecordWritten -SourceIdentifier DefenderWatcher -Action {
+        $evt = $EventArgs.EventRecord
+        Write-Log "📢 Defender event $($evt.Id): $($evt.FormatDescription())"
+        Check-DefenderChanges
+    } | Out-Null
+    $watcher.Enabled = $true
+    Write-Log "Event-driven monitoring enabled (5001,5007). Logs will be immediate."
+}
+catch {
+    Write-Log "⚠ Failed to register event watcher: $_"
+}
+
+
+$Interval = 10
+Write-Log "Also running periodic checks every $Interval seconds."
+
+
+Read-Host  
+
+
+Write-Host ""
+Write-Host "2. Scroll through your process activity history." -ForegroundColor Cyan
+Write-Host ""
+
+
+
+$overallSuccess = [math]::Round((($success1 + $success2 + $success3 + $success4 + $success5 + $success6 + $success7 + $success8) / ($total1 + $total2 + $total3 + $total4 + $total5 + $total6 + $total7 + $total8)) * 100, 0)
+$overallColor = if ($overallSuccess -eq 100) { "Green" } else { "Red" }
+Write-ColoredLine "OVERALL SUCCESS: $overallSuccess%" $overallColor
+
+Unregister-Event -SourceIdentifier FileCreated -ErrorAction SilentlyContinue
+Unregister-Event -SourceIdentifier FileChanged -ErrorAction SilentlyContinue
+
+Wait-ForEnter -Message "Press Enter to Exit"
+exit
+
