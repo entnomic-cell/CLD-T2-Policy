@@ -183,7 +183,7 @@ Clear-Host
 New-Item -ItemType Directory -Path "C:\ToolsCLD" -ErrorAction SilentlyContinue | Out-Null
 Start-FileWatcher
 
-Write-BoxedHeader "STEP 1/8: SYSTEM INTEGRITY" "Verifying security configuration..."
+Write-BoxedHeader "STEP 1/9: SYSTEM INTEGRITY" "Verifying security configuration..."
 Show-CustomLoadingBar
 
 $modulesOutput = @()
@@ -225,9 +225,39 @@ try {
     $defenderOutput += "WARNING: Defender status check failed."
 }
 
-$exclusionsOutput += if ((Get-MpPreference).ExclusionPath) { "FAILURE: Defender exclusions found." } else { "SUCCESS: No Defender exclusions." }
+try {
+    $exclusions = (Get-MpPreference).ExclusionPath
+    if ($exclusions) {
+        $exclusionsOutput += "FAILURE: Defender exclusions detected."
+        foreach ($excl in $exclusions) {
+            $exclusionsOutput += "  → $excl"
+        }
+    } else {
+        $exclusionsOutput += "SUCCESS: No Defender exclusions."
+    }
+} catch {
+    $exclusionsOutput += "WARNING: Cannot check exclusions."
+}
 
-$threatsOutput += if ((Get-MpThreat).Count -eq 0) { "SUCCESS: No active threats detected." } else { "FAILURE: Active threats detected." }
+try {
+    $threats = Get-MpThreat -ErrorAction Stop
+    if ($threats.Count -eq 0) {
+        $threatsOutput += "SUCCESS: No active threats detected."
+    } else {
+        $threatsOutput += "FAILURE: Active threats detected ($($threats.Count) total)."
+        foreach ($threat in $threats) {
+            $threatsOutput += "  → Threat: $($threat.ThreatName)"
+            $threatsOutput += "    Severity: $($threat.SeverityID) | Status: $($threat.ThreatStatusID)"
+            if ($threat.Resources) {
+                foreach ($resource in $threat.Resources) {
+                    $threatsOutput += "    Path: $resource"
+                }
+            }
+        }
+    }
+} catch {
+    $threatsOutput += "WARNING: Cannot retrieve threat information."
+}
 
 try {
     $sig = Get-AuthenticodeSignature "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -252,7 +282,7 @@ Write-StepResult -Success $success1 -Total $total1 -StepNumber 1
 Wait-ForEnter -Message "Press Enter to Continue to Step 2"
 Clear-Host
 
-Write-BoxedHeader "STEP 2/8: BAM & PREFETCH ANALYSIS" "Analyzing Background Activity Moderator and Prefetch..."
+Write-BoxedHeader "STEP 2/9: BAM & PREFETCH ANALYSIS" "Analyzing Background Activity Moderator and Prefetch..."
 Show-CustomLoadingBar
 
 $bamOutput = @()
@@ -451,10 +481,7 @@ Write-StepResult -Success $success2 -Total $total2 -StepNumber 2
 Wait-ForEnter -Message "Press Enter to Continue to Step 3"
 Clear-Host
 
-
-
-
-Write-BoxedHeader "STEP 3/8: PROCESS EXPLORER" "Launching Sysinternals Process Explorer..."
+Write-BoxedHeader "STEP 3/9: PROCESS EXPLORER" "Launching Sysinternals Process Explorer..."
 Write-ColoredLine "  📋 INSTRUCTIONS: Review all processes, scroll to bottom, then close the window." Yellow
 Show-CustomLoadingBar
 
@@ -544,7 +571,7 @@ Write-StepResult -Success $success3 -Total $total3 -StepNumber 3
 Wait-ForEnter -Message "Press Enter to Continue to Step 4"
 Clear-Host
 
-Write-BoxedHeader "STEP 4/8: WINOBJ INSPECTION" "Launching Windows Object Manager Viewer..."
+Write-BoxedHeader "STEP 4/9: WINOBJ INSPECTION" "Launching Windows Object Manager Viewer..."
 Write-ColoredLine "  📋 INSTRUCTIONS: Navigate to Sessions > 0 > Dos Devices > Inspect folders" Yellow
 Show-CustomLoadingBar
 
@@ -614,7 +641,7 @@ Write-StepResult -Success $success4 -Total $total4 -StepNumber 4
 Wait-ForEnter -Message "Press Enter to Continue to Step 5"
 Clear-Host
 
-Write-BoxedHeader "STEP 5/8: AUTORUN ANALYSIS" "Launching Autoruns..."
+Write-BoxedHeader "STEP 5/9: AUTORUN ANALYSIS" "Launching Autoruns..."
 Write-ColoredLine "  📋 INSTRUCTIONS: Wait for 'Ready' status, scroll through entries, then close" Yellow
 Show-CustomLoadingBar
 
@@ -681,7 +708,7 @@ Write-StepResult -Success $success5 -Total $total5 -StepNumber 5
 Wait-ForEnter -Message "Press Enter to Continue to Step 6"
 Clear-Host
 
-Write-BoxedHeader "STEP 6/8: PERIPHERAL SOFTWARE" "Detecting gaming peripheral software..."
+Write-BoxedHeader "STEP 6/9: PERIPHERAL SOFTWARE" "Detecting gaming peripheral software..."
 Show-CustomLoadingBar
 
 $hardwareOutput = @()
@@ -731,11 +758,73 @@ Write-StepResult -Success $success6 -Total $total6 -StepNumber 6
 Wait-ForEnter -Message "Press Enter to Continue to Step 7"
 Clear-Host
 
-Write-BoxedHeader "STEP 7/8: COMPREHENSIVE SCAN" "Scanning system for suspicious activity..."
-Write-ColoredLine "  ⚠  DO NOT CLOSE THIS WINDOW" Red
+Write-BoxedHeader "STEP 7/9: REGISTRY DEEP SCAN" "Scanning Windows Registry for suspicious entries..."
 Show-CustomLoadingBar
 
 $step7Output = @()
+$suspiciousCombined = @(
+    "matcha","olduimatrix","autoexe","bin","workspace","monkeyaim","thunderaim","thunderclient",
+    "celex","release","matrix","matcha.exe","triggerbot","solara","xeno","wave","cloudy",
+    "tupical","horizon","myst","celery","zarora","juju","nezure","FusionHacks.zip","release.zip",
+    "bootstrapper","aimmy.exe","aimmy","Fluxus","clumsy","build","build.zip","build.rar","MystW.exe",
+    "isabelle","dx9","dx9ware","bootstrappernew","loader","santoware","mystw","severe","mapper",
+    "BOOTSTRAPPERNEW.EXE","BOOTSTRAPPER.EXE","XENO.EXE","XENOUI.EXE","SOLARA.EXE","MAPPER.EXE",
+    "LOADER.EXE","MATCHA.EXE","EVOLVE.EXE"
+)
+
+$registryPaths = @(
+    "HKCU:\SOFTWARE\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+    "HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows"
+)
+
+$foundSuspiciousRegistry = $false
+foreach ($regPath in $registryPaths) {
+    try {
+        if (Test-Path $regPath) {
+            $entries = Get-ItemProperty -Path $regPath -ErrorAction Stop
+            foreach ($prop in $entries.PSObject.Properties) {
+                if ($prop.Name -notlike "PS*") {
+                    $value = $prop.Value
+                    foreach ($susp in $suspiciousCombined) {
+                        if (($prop.Name -imatch [regex]::Escape($susp)) -or ($value -imatch [regex]::Escape($susp))) {
+                            $step7Output += "FAILURE: Suspicious registry entry detected."
+                            $step7Output += "  → Path: $regPath"
+                            $step7Output += "  → Key: $($prop.Name)"
+                            $step7Output += "  → Value: $value"
+                            $foundSuspiciousRegistry = $true
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        $step7Output += "WARNING: Cannot access registry path: $regPath"
+    }
+}
+
+if (-not $foundSuspiciousRegistry -and ($step7Output | Where-Object { $_ -notmatch '^WARNING' }).Count -eq 0) {
+    $step7Output += "SUCCESS: No suspicious registry entries detected."
+}
+
+Write-Section "Registry Deep Scan" $step7Output
+
+$total7 = ($step7Output | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success7 = ($step7Output | Where-Object { $_ -match '^SUCCESS' }).Count
+
+Write-StepResult -Success $success7 -Total $total7 -StepNumber 7
+Wait-ForEnter -Message "Press Enter to Continue to Step 8"
+Clear-Host
+
+
+Write-BoxedHeader "STEP 8/9: COMPREHENSIVE SCAN" "Scanning system for suspicious activity..."
+Write-ColoredLine "  ⚠  DO NOT CLOSE THIS WINDOW" Red
+Show-CustomLoadingBar
+
+$step8Output = @()
 $suspiciousCombined = @(
     "matcha","olduimatrix","autoexe","bin","workspace","monkeyaim","thunderaim","thunderclient",
     "celex","release","matrix","matcha.exe","triggerbot","solara","xeno","wave","cloudy",
@@ -753,16 +842,16 @@ try {
     foreach ($file in $downloadFiles) {
         foreach ($susp in $suspiciousCombined) {
             if ($file.Name -imatch [regex]::Escape($susp)) {
-                $step7Output += "FAILURE: Suspicious file: $($file.Name)"
+                $step8Output += "FAILURE: Suspicious file: $($file.Name)"
                 $foundSuspicious = $true
             }
         }
     }
     if (-not $foundSuspicious) {
-        $step7Output += "SUCCESS: No suspicious files in Downloads."
+        $step8Output += "SUCCESS: No suspicious files in Downloads."
     }
 } catch {
-    $step7Output += "WARNING: Cannot access Downloads folder."
+    $step8Output += "WARNING: Cannot access Downloads folder."
 }
 
 try {
@@ -771,16 +860,16 @@ try {
     foreach ($proc in $activeProcs) {
         foreach ($susp in $suspiciousCombined) {
             if ($proc -imatch [regex]::Escape($susp)) {
-                $step7Output += "FAILURE: Suspicious process: $proc"
+                $step8Output += "FAILURE: Suspicious process: $proc"
                 $foundSuspicious = $true
             }
         }
     }
     if (-not $foundSuspicious) {
-        $step7Output += "SUCCESS: No suspicious active processes."
+        $step8Output += "SUCCESS: No suspicious active processes."
     }
 } catch {
-    $step7Output += "WARNING: Process scan failed."
+    $step8Output += "WARNING: Process scan failed."
 }
 
 try {
@@ -790,7 +879,7 @@ try {
     foreach ($prop in $entries.PSObject.Properties) {
         foreach ($susp in $suspiciousCombined) {
             if ($prop.Name.ToLower() -like "*$susp*") {
-                $step7Output += "WARNING: Suspicious registry entry found."
+                $step8Output += "WARNING: Suspicious registry entry found."
                 $foundSuspicious = $true
                 break
             }
@@ -798,10 +887,10 @@ try {
         if ($foundSuspicious) { break }
     }
     if (-not $foundSuspicious) {
-        $step7Output += "SUCCESS: No suspicious registry entries."
+        $step8Output += "SUCCESS: No suspicious registry entries."
     }
 } catch {
-    $step7Output += "WARNING: Registry scan failed."
+    $step8Output += "WARNING: Registry scan failed."
 }
 
 Start-Job {
@@ -842,16 +931,16 @@ Start-Job {
     [void] $form.ShowDialog()
 } | Out-Null
 
-Write-Section "Comprehensive Security Scan" $step7Output
+Write-Section "Comprehensive Security Scan" $step8Output
 
-$total7 = ($step7Output | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
-$success7 = ($step7Output | Where-Object { $_ -match '^SUCCESS' }).Count
+$total8 = ($step8Output | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success8 = ($step8Output | Where-Object { $_ -match '^SUCCESS' }).Count
 
-Write-StepResult -Success $success7 -Total $total7 -StepNumber 7
-Wait-ForEnter -Message "Press Enter to Continue to Step 8"
+Write-StepResult -Success $success8 -Total $total8 -StepNumber 8
+Wait-ForEnter -Message "Press Enter to Continue to Step 9"
 Clear-Host
 
-Write-BoxedHeader "STEP 8/8: DEFENDER HISTORY" "Reviewing Windows Defender protection history..."
+Write-BoxedHeader "STEP 9/9: DEFENDER HISTORY" "Reviewing Windows Defender protection history..."
 Show-CustomLoadingBar
 
 $defenderHistoryOutput = @()
@@ -870,10 +959,10 @@ try {
 
 Write-Section "Windows Defender History" $defenderHistoryOutput
 
-$total8 = ($defenderHistoryOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
-$success8 = ($defenderHistoryOutput | Where-Object { $_ -match '^SUCCESS' }).Count
+$total9 = ($defenderHistoryOutput | Where-Object { $_ -match '^(SUCCESS|FAILURE|WARNING)' }).Count
+$success9 = ($defenderHistoryOutput | Where-Object { $_ -match '^SUCCESS' }).Count
 
-Write-StepResult -Success $success8 -Total $total8 -StepNumber 8
+Write-StepResult -Success $success9 -Total $total9 -StepNumber 9
 
 Write-Host ""
 Write-ColoredLine "  ═══════════════════════════════════════════════════════════════════════════════════════" Cyan
@@ -1040,8 +1129,8 @@ Write-ColoredLine "  ═══════════════════�
 Write-Host ""
 Write-ColoredLine "  1. Leave this window open during gameplay" White
 Write-ColoredLine "  2. Any Defender changes will be logged above in real-time" White
-Write-ColoredLine "  3. When finished, press Enter below to view final report" White
-Write-ColoredLine "  4. Check the Process Activity Monitor window for suspicious processes" White
+Write-ColoredLine "  3. Check the Process Activity Monitor window for suspicious processes" White
+Write-ColoredLine "  4. When finished, press Enter below to view final report" White
 Write-Host ""
 
 Write-ColoredLine "  ► Press Enter when you have finished your game session" Cyan
@@ -1062,8 +1151,8 @@ Write-ColoredLine "                              FINAL SCAN REPORT" Green
 Write-ColoredLine "  ═══════════════════════════════════════════════════════════════════════════════════════" Cyan
 Write-Host ""
 
-$totalChecks = $total1 + $total2 + $total3 + $total4 + $total5 + $total6 + $total7 + $total8
-$totalSuccess = $success1 + $success2 + $success3 + $success4 + $success5 + $success6 + $success7 + $success8
+$totalChecks = $total1 + $total2 + $total3 + $total4 + $total5 + $total6 + $total7 + $total8 + $total9
+$totalSuccess = $success1 + $success2 + $success3 + $success4 + $success5 + $success6 + $success7 + $success8 + $success9
 $overallSuccess = if ($totalChecks -gt 0) { [math]::Round(($totalSuccess / $totalChecks) * 100, 0) } else { 100 }
 $overallColor = if ($overallSuccess -eq 100) { "Green" } elseif ($overallSuccess -ge 80) { "Yellow" } else { "Red" }
 
@@ -1092,6 +1181,5 @@ Clear-Host
 Write-ColoredLine "`n  Thank you for using CLD T2 Policy Scanner`n" Cyan
 Write-ColoredLine "  Log saved to: $LogFile`n" Gray
 exit
-
 
 
